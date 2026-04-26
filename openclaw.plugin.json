@@ -1,0 +1,34 @@
+{
+  "id": "plamo",
+  "name": "Preferred Networks Provider",
+  "description": "Preferred Networks PLaMo model provider plugin",
+  "version": "0.1.0",
+  "providers": ["plamo"],
+  "nonSecretAuthMarkers": ["plamo-request-auth"],
+  "modelSupport": {
+    "modelPrefixes": ["plamo-"]
+  },
+  "providerAuthEnvVars": {
+    "plamo": ["PLAMO_API_KEY"]
+  },
+  "providerAuthChoices": [
+    {
+      "provider": "plamo",
+      "method": "api-key",
+      "choiceId": "plamo-api-key",
+      "choiceLabel": "Preferred Networks API key",
+      "groupId": "plamo",
+      "groupLabel": "Preferred Networks",
+      "groupHint": "PLaMo API",
+      "optionKey": "plamoApiKey",
+      "cliFlag": "--plamo-api-key",
+      "cliOption": "--plamo-api-key <key>",
+      "cliDescription": "Preferred Networks API key"
+    }
+  ],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}

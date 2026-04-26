@@ -1,0 +1,63 @@
+{
+  "name": "@mitmul/openclaw-plamo-provider",
+  "version": "0.1.0",
+  "description": "OpenClaw provider plugin for Preferred Networks PLaMo",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "openclaw.plugin.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "prepack": "pnpm build"
+  },
+  "keywords": [
+    "openclaw",
+    "openclaw-plugin",
+    "plamo",
+    "preferred-networks",
+    "llm-provider"
+  ],
+  "peerDependencies": {
+    "openclaw": ">=2026.4.24"
+  },
+  "dependencies": {
+    "@mariozechner/pi-agent-core": "0.70.2",
+    "@mariozechner/pi-ai": "0.70.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "openclaw": "2026.4.24",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.0"
+  },
+  "openclaw": {
+    "extensions": [
+      "./dist/index.js"
+    ],
+    "providers": [
+      "plamo"
+    ],
+    "compat": {
+      "pluginApi": ">=2026.4.24",
+      "minGatewayVersion": "2026.4.24"
+    },
+    "build": {
+      "openclawVersion": "2026.4.24",
+      "pluginSdkVersion": "2026.4.24"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
