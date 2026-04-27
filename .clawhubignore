@@ -1,7 +1,12 @@
 .clawhubignore
+.gitignore
 src/
 test/
 tsconfig.json
 pnpm-lock.yaml
+vitest.config.ts
+dist/**/*.d.ts
+dist/**/*.d.ts.map
+dist/**/*.js.map
 coverage/
 *.tgz

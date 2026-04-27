@@ -1,6 +1,6 @@
 {
   "name": "@mitmul/openclaw-plamo-provider",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "OpenClaw provider plugin for Preferred Networks PLaMo",
   "license": "MIT",
   "type": "module",
@@ -12,8 +12,8 @@
   "files": [
     "dist",
     "openclaw.plugin.json",
-    "SKILL.md",
     "README.md",
+    "SECURITY.md",
     "LICENSE"
   ],
   "scripts": {
@@ -44,6 +44,9 @@
   },
   "openclaw": {
     "extensions": [
+      "./dist/index.js"
+    ],
+    "runtimeExtensions": [
       "./dist/index.js"
     ],
     "providers": [
