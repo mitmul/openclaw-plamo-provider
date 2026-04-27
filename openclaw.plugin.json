@@ -2,7 +2,7 @@
   "id": "plamo",
   "name": "Preferred Networks Provider",
   "description": "Preferred Networks PLaMo model provider plugin",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "providers": ["plamo"],
   "nonSecretAuthMarkers": ["plamo-request-auth"],
   "modelSupport": {
