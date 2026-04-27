@@ -20,13 +20,10 @@ function readPackageJson(): Record<string, unknown> {
 }
 
 describe("OpenClaw plugin manifest", () => {
-  it("declares the PLaMo API key in descriptor-first setup metadata", () => {
+  it("declares the PLaMo API key only in descriptor-first setup metadata", () => {
     const manifest = readManifest();
 
     expect(manifest).toMatchObject({
-      providerAuthEnvVars: {
-        plamo: ["PLAMO_API_KEY"],
-      },
       setup: {
         providers: [
           {
@@ -44,6 +41,7 @@ describe("OpenClaw plugin manifest", () => {
         localPayloadDumps: false,
       },
     });
+    expect(manifest).not.toHaveProperty("providerAuthEnvVars");
   });
 
   it("keeps package and manifest security metadata aligned for ClawHub", () => {
