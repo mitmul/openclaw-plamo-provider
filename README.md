@@ -34,6 +34,10 @@ variable. When it is set to a local file path, the provider appends one JSON
 record per PLaMo streaming payload to that file. Normal provider use does not
 require setting this variable.
 
+Payload dumps can include prompts, tool call payloads, tool results, and model
+responses. Leave this variable unset during normal use, and review or redact
+dump files before sharing them or attaching them to issues.
+
 ## Development
 
 ```bash
