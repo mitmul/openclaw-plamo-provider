@@ -95,7 +95,16 @@ type StreamingTextBlock = {
   streamStarted?: boolean;
 };
 
-const PLAMO_PAYLOAD_DUMP_PATH = process.env.OPENCLAW_PLAMO_PAYLOAD_DUMP_PATH?.trim() || "";
+type PlamoPayloadDumpEnv = Partial<
+  Record<"OPENCLAW_PLAMO_DEBUG_PAYLOAD_DUMP" | "OPENCLAW_PLAMO_PAYLOAD_DUMP_PATH", string>
+>;
+
+export function resolvePlamoPayloadDumpPath(env: PlamoPayloadDumpEnv = process.env): string {
+  if (env.OPENCLAW_PLAMO_DEBUG_PAYLOAD_DUMP?.trim() !== "1") {
+    return "";
+  }
+  return env.OPENCLAW_PLAMO_PAYLOAD_DUMP_PATH?.trim() || "";
+}
 
 type OpenAIStyleToolCall = {
   index?: unknown;
@@ -318,17 +327,18 @@ function injectPlamoMaxTokens(
 }
 
 function dumpPlamoPayload(kind: "streaming", payload: Record<string, unknown>): void {
-  if (!PLAMO_PAYLOAD_DUMP_PATH) {
+  const dumpPath = resolvePlamoPayloadDumpPath();
+  if (!dumpPath) {
     return;
   }
   try {
-    fs.mkdirSync(path.dirname(PLAMO_PAYLOAD_DUMP_PATH), { recursive: true });
+    fs.mkdirSync(path.dirname(dumpPath), { recursive: true });
   } catch {
     // ignore dump directory failures
   }
   try {
     fs.appendFileSync(
-      PLAMO_PAYLOAD_DUMP_PATH,
+      dumpPath,
       `${JSON.stringify({ ts: Date.now(), kind, payload })}\n`,
       "utf8",
     );

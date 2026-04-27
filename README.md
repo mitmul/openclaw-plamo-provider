@@ -29,13 +29,14 @@ PLaMo model names can be used before the local catalog is refreshed.
 
 ## Debugging
 
-`OPENCLAW_PLAMO_PAYLOAD_DUMP_PATH` is an optional debugging environment
-variable. When it is set to a local file path, the provider appends one JSON
-record per PLaMo streaming payload to that file. Normal provider use does not
-require setting this variable.
+Payload dumping is an optional debugging feature. To enable it, set both
+`OPENCLAW_PLAMO_DEBUG_PAYLOAD_DUMP=1` and
+`OPENCLAW_PLAMO_PAYLOAD_DUMP_PATH` to a local file path. The provider then
+appends one JSON record per PLaMo streaming payload to that file. Normal
+provider use does not require setting either variable.
 
 Payload dumps can include prompts, tool call payloads, tool results, and model
-responses. Leave this variable unset during normal use, and review or redact
+responses. Leave these variables unset during normal use, and review or redact
 dump files before sharing them or attaching them to issues.
 
 ## Development
