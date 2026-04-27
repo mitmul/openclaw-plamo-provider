@@ -48,7 +48,6 @@ provider plugins as code.
 The authoritative credential metadata for this provider is:
 
 - `openclaw.plugin.json` `setup.providers[].envVars`: `PLAMO_API_KEY`
-- `openclaw.plugin.json` `providerAuthEnvVars.plamo`: `PLAMO_API_KEY`
 - `package.json` `openclaw.security.requiredEnv`: `PLAMO_API_KEY`
 
 ## Development

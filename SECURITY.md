@@ -9,7 +9,6 @@ The PLaMo provider requires one primary credential: `PLAMO_API_KEY`.
 The credential is declared in:
 
 - `openclaw.plugin.json` `setup.providers[].envVars`
-- `openclaw.plugin.json` `providerAuthEnvVars.plamo`
 - `package.json` `openclaw.security.requiredEnv`
 - `package.json` `clawhub.security.requiredEnv`
 
