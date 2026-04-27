@@ -27,6 +27,13 @@ The default model is `plamo/plamo-3.0-prime-beta`. Uncataloged model IDs with
 the `plamo-` prefix are accepted through dynamic model resolution so newer
 PLaMo model names can be used before the local catalog is refreshed.
 
+## Debugging
+
+`OPENCLAW_PLAMO_PAYLOAD_DUMP_PATH` is an optional debugging environment
+variable. When it is set to a local file path, the provider appends one JSON
+record per PLaMo streaming payload to that file. Normal provider use does not
+require setting this variable.
+
 ## Development
 
 ```bash
