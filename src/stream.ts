@@ -1,6 +1,4 @@
 import { createHash } from "node:crypto";
-import fs from "node:fs";
-import path from "node:path";
 import type { AgentMessage, StreamFn } from "@mariozechner/pi-agent-core";
 import {
   calculateCost,
@@ -94,17 +92,6 @@ type StreamingTextBlock = {
   rawText?: string;
   streamStarted?: boolean;
 };
-
-type PlamoPayloadDumpEnv = Partial<
-  Record<"OPENCLAW_PLAMO_DEBUG_PAYLOAD_DUMP" | "OPENCLAW_PLAMO_PAYLOAD_DUMP_PATH", string>
->;
-
-export function resolvePlamoPayloadDumpPath(env: PlamoPayloadDumpEnv = process.env): string {
-  if (env.OPENCLAW_PLAMO_DEBUG_PAYLOAD_DUMP?.trim() !== "1") {
-    return "";
-  }
-  return env.OPENCLAW_PLAMO_PAYLOAD_DUMP_PATH?.trim() || "";
-}
 
 type OpenAIStyleToolCall = {
   index?: unknown;
@@ -324,27 +311,6 @@ function injectPlamoMaxTokens(
     return;
   }
   payload[field] = Math.trunc(maxTokens);
-}
-
-function dumpPlamoPayload(kind: "streaming", payload: Record<string, unknown>): void {
-  const dumpPath = resolvePlamoPayloadDumpPath();
-  if (!dumpPath) {
-    return;
-  }
-  try {
-    fs.mkdirSync(path.dirname(dumpPath), { recursive: true });
-  } catch {
-    // ignore dump directory failures
-  }
-  try {
-    fs.appendFileSync(
-      dumpPath,
-      `${JSON.stringify({ ts: Date.now(), kind, payload })}\n`,
-      "utf8",
-    );
-  } catch {
-    // ignore dump write failures
-  }
 }
 
 function escapeRegExp(text: string): string {
@@ -1082,7 +1048,6 @@ function createNativePlamoStream(
     let sawFinishReason = false;
     try {
       const payload = await resolvePlamoStreamingPayload(model, context, options);
-      dumpPlamoPayload("streaming", payload);
       const apiKey = resolvePlamoApiKey(model, options);
       const fetchWithModelTransport = buildGuardedModelFetch(model as never);
       const response = await fetchWithModelTransport(buildChatCompletionsUrl(model.baseUrl), {
@@ -1812,7 +1777,6 @@ export function createPlamoToolCallWrapper(baseStreamFn: StreamFn | undefined): 
             overridden as Record<string, unknown>,
             effectiveModel,
           );
-          dumpPlamoPayload("streaming", normalized);
           return normalized;
         }
         if (nextPayload && typeof nextPayload === "object" && !Array.isArray(nextPayload)) {
@@ -1820,7 +1784,6 @@ export function createPlamoToolCallWrapper(baseStreamFn: StreamFn | undefined): 
             nextPayload as Record<string, unknown>,
             effectiveModel,
           );
-          dumpPlamoPayload("streaming", normalized);
           return normalized;
         }
         return nextPayload;

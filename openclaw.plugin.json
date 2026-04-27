@@ -2,7 +2,7 @@
   "id": "plamo",
   "name": "Preferred Networks Provider",
   "description": "Preferred Networks PLaMo model provider plugin",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "providers": ["plamo"],
   "nonSecretAuthMarkers": ["plamo-request-auth"],
   "modelSupport": {
@@ -35,6 +35,12 @@
       }
     ],
     "requiresRuntime": false
+  },
+  "security": {
+    "primaryCredential": "PLAMO_API_KEY",
+    "requiredEnv": ["PLAMO_API_KEY"],
+    "optionalEnv": [],
+    "localPayloadDumps": false
   },
   "configSchema": {
     "type": "object",
