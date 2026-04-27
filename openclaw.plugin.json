@@ -26,6 +26,16 @@
       "cliDescription": "Preferred Networks API key"
     }
   ],
+  "setup": {
+    "providers": [
+      {
+        "id": "plamo",
+        "authMethods": ["api-key"],
+        "envVars": ["PLAMO_API_KEY"]
+      }
+    ],
+    "requiresRuntime": false
+  },
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
