@@ -51,9 +51,11 @@ describe("OpenClaw plugin manifest", () => {
     const packageJson = readPackageJson();
 
     expect(packageJson.version).toBe(manifest.version);
-    expect(packageJson.files).toContain("SKILL.md");
+    expect(packageJson.files).toContain("SECURITY.md");
+    expect(packageJson.files).not.toContain("SKILL.md");
     expect(packageJson).toMatchObject({
       openclaw: {
+        runtimeExtensions: ["./dist/index.js"],
         security: {
           primaryCredential: "PLAMO_API_KEY",
           requiredEnv: ["PLAMO_API_KEY"],
@@ -72,11 +74,15 @@ describe("OpenClaw plugin manifest", () => {
     });
   });
 
-  it("ships skill-frontmatter credential metadata for ClawHub scanners", () => {
-    const skill = fs.readFileSync(path.join(repoRoot, "SKILL.md"), "utf8");
+  it("documents code-plugin credential metadata for ClawHub scanners", () => {
+    const readme = fs.readFileSync(path.join(repoRoot, "README.md"), "utf8");
+    const security = fs.readFileSync(path.join(repoRoot, "SECURITY.md"), "utf8");
 
-    expect(skill).toContain('"requires": { "env": ["PLAMO_API_KEY"] }');
-    expect(skill).toContain('"primaryEnv": "PLAMO_API_KEY"');
+    expect(readme).toContain("This repository publishes an OpenClaw code plugin");
+    expect(readme).toContain("openclaw.plugin.json");
+    expect(readme).toContain("package.json");
+    expect(security).toContain("not a user-invocable ClawHub skill");
+    expect(security).toContain("PLAMO_API_KEY");
   });
 
   it("does not retain the removed local model-payload file write contract", () => {

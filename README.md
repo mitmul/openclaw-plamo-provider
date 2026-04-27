@@ -39,6 +39,18 @@ provider config overrides the endpoint.
 This package has no local prompt or response export feature and does not define
 debug environment variables for writing model payloads to disk.
 
+## ClawHub package metadata
+
+This repository publishes an OpenClaw code plugin, not a ClawHub skill. The
+package contains built runtime JavaScript under `dist/` because OpenClaw loads
+provider plugins as code.
+
+The authoritative credential metadata for this provider is:
+
+- `openclaw.plugin.json` `setup.providers[].envVars`: `PLAMO_API_KEY`
+- `openclaw.plugin.json` `providerAuthEnvVars.plamo`: `PLAMO_API_KEY`
+- `package.json` `openclaw.security.requiredEnv`: `PLAMO_API_KEY`
+
 ## Development
 
 ```bash
