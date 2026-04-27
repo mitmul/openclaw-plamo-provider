@@ -1,0 +1,7 @@
+.clawhubignore
+src/
+test/
+tsconfig.json
+pnpm-lock.yaml
+coverage/
+*.tgz
