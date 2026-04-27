@@ -41,6 +41,7 @@ const PLAMO_TAG_TOKENS = [
   PLAMO_MSG,
 ] as const;
 const PLAMO_SYNTHETIC_TURN_SEED_SYMBOL = Symbol("openclaw.plamoSyntheticTurnSeed");
+const PLAMO_EMPTY_STREAM_MAX_RETRIES = 1;
 
 const PLAMO_TOOL_REQUEST_BLOCK_RE = new RegExp(
   `${escapeRegExp(PLAMO_BEGIN_TOOL_REQUEST)}(.*?)${escapeRegExp(PLAMO_END_TOOL_REQUEST)}`,
@@ -1045,281 +1046,309 @@ function createNativePlamoStream(
 
   void (async () => {
     let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
-    let sawFinishReason = false;
+    let started = false;
     try {
       const payload = await resolvePlamoStreamingPayload(model, context, options);
       const apiKey = resolvePlamoApiKey(model, options);
       const fetchWithModelTransport = buildGuardedModelFetch(model as never);
-      const response = await fetchWithModelTransport(buildChatCompletionsUrl(model.baseUrl), {
-        method: "POST",
-        headers: buildRequestHeaders(model, apiKey, options),
-        body: JSON.stringify(payload),
-        signal: options?.signal,
-      });
+      for (let attemptIndex = 0; attemptIndex <= PLAMO_EMPTY_STREAM_MAX_RETRIES; attemptIndex += 1) {
+        let sawCompletionChunk = false;
+        let sawFinishReason = false;
+        let sawAssistantOutput = false;
+        const response = await fetchWithModelTransport(buildChatCompletionsUrl(model.baseUrl), {
+          method: "POST",
+          headers: buildRequestHeaders(model, apiKey, options),
+          body: JSON.stringify(payload),
+          signal: options?.signal,
+        });
 
-      if (!response.ok) {
-        throw new Error(
-          formatHttpErrorMessage(response.status, response.statusText, await response.text()),
-        );
-      }
-      if (!response.body) {
-        throw new Error("PLaMo streaming response did not include a body");
-      }
-
-      reader = response.body.getReader();
-      stream.push({ type: "start", partial: output });
-
-      let currentBlock:
-        | StreamingTextBlock
-        | { type: "thinking"; thinking: string; thinkingSignature?: string }
-        | StreamingToolCallBlock
-        | null = null;
-      const activeToolCallStates = new Map<string, ActiveToolCallState>();
-      const blocks = output.content;
-      const blockIndex = () => blocks.length - 1;
-      const finishOpenToolCallBlocks = () => {
-        const states = [...new Set(activeToolCallStates.values())];
-        activeToolCallStates.clear();
-        for (const state of states) {
-          const finalArgs = parseToolArguments(state.block.partialArgs) ?? {};
-          delete (state.block as { partialArgs?: string }).partialArgs;
-          state.block.arguments = finalArgs;
-          stream.push({
-            type: "toolcall_end",
-            contentIndex: state.contentIndex,
-            toolCall: state.block,
-            partial: output,
-          });
-        }
-      };
-      const finishCurrentBlock = () => {
-        if (!currentBlock) {
-          return;
-        }
-        if (currentBlock.type === "text") {
-          currentBlock.text = resolveStreamingVisiblePlamoText(
-            resolveStreamingTextBlockRawText(currentBlock),
-            {
-              includeTrailingPrefix: false,
-            },
+        if (!response.ok) {
+          throw new Error(
+            formatHttpErrorMessage(response.status, response.statusText, await response.text()),
           );
-          if (currentBlock.streamStarted) {
+        }
+        if (!response.body) {
+          throw new Error("PLaMo streaming response did not include a body");
+        }
+
+        reader = response.body.getReader();
+        if (!started) {
+          stream.push({ type: "start", partial: output });
+          started = true;
+        }
+
+        let currentBlock:
+          | StreamingTextBlock
+          | { type: "thinking"; thinking: string; thinkingSignature?: string }
+          | StreamingToolCallBlock
+          | null = null;
+        const activeToolCallStates = new Map<string, ActiveToolCallState>();
+        const blocks = output.content;
+        const blockIndex = () => blocks.length - 1;
+        const finishOpenToolCallBlocks = () => {
+          const states = [...new Set(activeToolCallStates.values())];
+          activeToolCallStates.clear();
+          for (const state of states) {
+            const finalArgs = parseToolArguments(state.block.partialArgs) ?? {};
+            delete (state.block as { partialArgs?: string }).partialArgs;
+            state.block.arguments = finalArgs;
             stream.push({
-              type: "text_end",
-              contentIndex: blockIndex(),
-              content: currentBlock.text,
+              type: "toolcall_end",
+              contentIndex: state.contentIndex,
+              toolCall: state.block,
               partial: output,
             });
           }
-        } else if (currentBlock.type === "thinking") {
-          stream.push({
-            type: "thinking_end",
-            contentIndex: blockIndex(),
-            content: currentBlock.thinking,
-            partial: output,
-          });
-        } else {
-          const finalArgs = parseToolArguments(currentBlock.partialArgs) ?? {};
-          delete (currentBlock as { partialArgs?: string }).partialArgs;
-          currentBlock.arguments = finalArgs;
-          stream.push({
-            type: "toolcall_end",
-            contentIndex: blockIndex(),
-            toolCall: currentBlock,
-            partial: output,
-          });
-        }
-        currentBlock = null;
-      };
-
-      for await (const rawChunk of parseSsePayloads(reader)) {
-        const chunk = parseStreamingChunk(rawChunk);
-        if (!chunk) {
-          continue;
-        }
-
-        if (typeof chunk.id === "string" && chunk.id.length > 0) {
-          output.responseId ||= chunk.id;
-        }
-        if (chunk.usage) {
-          output.usage = parseUsage(chunk.usage, model);
-        }
-
-        const choice = Array.isArray(chunk.choices) ? chunk.choices[0] : undefined;
-        if (!choice) {
-          continue;
-        }
-        if (!chunk.usage && choice.usage) {
-          output.usage = parseUsage(choice.usage, model);
-        }
-        if (choice.finish_reason !== undefined && choice.finish_reason !== null) {
-          sawFinishReason = true;
-          const finishReasonResult = mapStopReason(choice.finish_reason);
-          output.stopReason = finishReasonResult.stopReason;
-          if (finishReasonResult.errorMessage) {
-            output.errorMessage = finishReasonResult.errorMessage;
+        };
+        const finishCurrentBlock = () => {
+          if (!currentBlock) {
+            return;
           }
-        }
-
-        const delta = choice.delta;
-        if (!isOpenAIStyleChunkDelta(delta)) {
-          continue;
-        }
-
-        const textDelta = typeof delta.content === "string" ? delta.content : "";
-        if (textDelta) {
-          finishOpenToolCallBlocks();
-          if (!currentBlock || currentBlock.type !== "text") {
-            finishCurrentBlock();
-            currentBlock = { type: "text", text: "", rawText: "", streamStarted: false };
-            output.content.push(currentBlock);
-          }
-          const previousVisibleText = currentBlock.text;
-          currentBlock.rawText = `${resolveStreamingTextBlockRawText(currentBlock)}${textDelta}`;
-          const nextVisibleText = resolveStreamingVisiblePlamoText(currentBlock.rawText);
-          const stableVisibleText =
-            nextVisibleText.length >= previousVisibleText.length
-              ? nextVisibleText
-              : previousVisibleText;
-          currentBlock.text = stableVisibleText;
-          if (!currentBlock.streamStarted && stableVisibleText.length > 0) {
-            currentBlock.streamStarted = true;
-            stream.push({ type: "text_start", contentIndex: blockIndex(), partial: output });
-          }
-          const visibleDelta = stableVisibleText.slice(previousVisibleText.length);
-          if (visibleDelta) {
-            stream.push({
-              type: "text_delta",
-              contentIndex: blockIndex(),
-              delta: visibleDelta,
-              partial: output,
-            });
-          }
-        }
-
-        const reasoningDelta = extractStreamingReasoning(delta);
-        if (reasoningDelta) {
-          finishOpenToolCallBlocks();
-          if (!currentBlock || currentBlock.type !== "thinking") {
-            finishCurrentBlock();
-            currentBlock = {
-              type: "thinking",
-              thinking: "",
-              thinkingSignature: "reasoning_content",
-            };
-            output.content.push(currentBlock);
-            stream.push({ type: "thinking_start", contentIndex: blockIndex(), partial: output });
-          }
-          currentBlock.thinking += reasoningDelta;
-          stream.push({
-            type: "thinking_delta",
-            contentIndex: blockIndex(),
-            delta: reasoningDelta,
-            partial: output,
-          });
-        }
-
-        if (Array.isArray(delta.tool_calls)) {
-          finishCurrentBlock();
-          for (const toolCall of delta.tool_calls as OpenAIStyleToolCall[]) {
-            const nextIndex = resolveToolCallChunkIndex(toolCall);
-            const nextId = typeof toolCall.id === "string" ? toolCall.id : "";
-            const indexKey = nextIndex !== null ? `index:${nextIndex}` : null;
-            const idKey = nextId ? `id:${nextId}` : null;
-            let state =
-              (indexKey ? activeToolCallStates.get(indexKey) : undefined) ??
-              (idKey ? activeToolCallStates.get(idKey) : undefined);
-            if (!state) {
-              const block: StreamingToolCallBlock = {
-                type: "toolCall",
-                id: nextId,
-                name:
-                  toolCall.function && typeof toolCall.function === "object"
-                    ? typeof toolCall.function.name === "string"
-                      ? toolCall.function.name
-                      : ""
-                    : "",
-                arguments: {},
-                partialArgs: "",
-              };
-              output.content.push(block);
-              state = {
-                block,
-                contentIndex: blockIndex(),
-              };
+          if (currentBlock.type === "text") {
+            currentBlock.text = resolveStreamingVisiblePlamoText(
+              resolveStreamingTextBlockRawText(currentBlock),
+              {
+                includeTrailingPrefix: false,
+              },
+            );
+            if (currentBlock.streamStarted) {
               stream.push({
-                type: "toolcall_start",
-                contentIndex: state.contentIndex,
+                type: "text_end",
+                contentIndex: blockIndex(),
+                content: currentBlock.text,
                 partial: output,
               });
             }
-            if (indexKey) {
-              activeToolCallStates.set(indexKey, state);
+          } else if (currentBlock.type === "thinking") {
+            stream.push({
+              type: "thinking_end",
+              contentIndex: blockIndex(),
+              content: currentBlock.thinking,
+              partial: output,
+            });
+          } else {
+            const finalArgs = parseToolArguments(currentBlock.partialArgs) ?? {};
+            delete (currentBlock as { partialArgs?: string }).partialArgs;
+            currentBlock.arguments = finalArgs;
+            stream.push({
+              type: "toolcall_end",
+              contentIndex: blockIndex(),
+              toolCall: currentBlock,
+              partial: output,
+            });
+          }
+          currentBlock = null;
+        };
+
+        for await (const rawChunk of parseSsePayloads(reader)) {
+          const chunk = parseStreamingChunk(rawChunk);
+          if (!chunk) {
+            continue;
+          }
+          sawCompletionChunk = true;
+
+          if (typeof chunk.id === "string" && chunk.id.length > 0) {
+            output.responseId ||= chunk.id;
+          }
+          if (chunk.usage) {
+            output.usage = parseUsage(chunk.usage, model);
+          }
+
+          const choice = Array.isArray(chunk.choices) ? chunk.choices[0] : undefined;
+          if (!choice) {
+            continue;
+          }
+          if (!chunk.usage && choice.usage) {
+            output.usage = parseUsage(choice.usage, model);
+          }
+          if (choice.finish_reason !== undefined && choice.finish_reason !== null) {
+            sawFinishReason = true;
+            const finishReasonResult = mapStopReason(choice.finish_reason);
+            output.stopReason = finishReasonResult.stopReason;
+            if (finishReasonResult.errorMessage) {
+              output.errorMessage = finishReasonResult.errorMessage;
             }
-            if (idKey) {
-              activeToolCallStates.set(idKey, state);
+          }
+
+          const delta = choice.delta;
+          if (!isOpenAIStyleChunkDelta(delta)) {
+            continue;
+          }
+
+          const textDelta = typeof delta.content === "string" ? delta.content : "";
+          if (textDelta) {
+            sawAssistantOutput = true;
+            finishOpenToolCallBlocks();
+            if (!currentBlock || currentBlock.type !== "text") {
+              finishCurrentBlock();
+              currentBlock = { type: "text", text: "", rawText: "", streamStarted: false };
+              output.content.push(currentBlock);
             }
-            const currentToolCall = state.block;
-            if (nextId) {
-              currentToolCall.id = nextId;
+            const previousVisibleText = currentBlock.text;
+            currentBlock.rawText = `${resolveStreamingTextBlockRawText(currentBlock)}${textDelta}`;
+            const nextVisibleText = resolveStreamingVisiblePlamoText(currentBlock.rawText);
+            const stableVisibleText =
+              nextVisibleText.length >= previousVisibleText.length
+                ? nextVisibleText
+                : previousVisibleText;
+            currentBlock.text = stableVisibleText;
+            if (!currentBlock.streamStarted && stableVisibleText.length > 0) {
+              currentBlock.streamStarted = true;
+              stream.push({ type: "text_start", contentIndex: blockIndex(), partial: output });
             }
-            if (toolCall.function && typeof toolCall.function === "object") {
-              if (typeof toolCall.function.name === "string") {
-                currentToolCall.name = toolCall.function.name;
-              }
-              const argsDelta =
-                typeof toolCall.function.arguments === "string" ? toolCall.function.arguments : "";
-              if (argsDelta) {
-                currentToolCall.partialArgs += argsDelta;
+            const visibleDelta = stableVisibleText.slice(previousVisibleText.length);
+            if (visibleDelta) {
+              stream.push({
+                type: "text_delta",
+                contentIndex: blockIndex(),
+                delta: visibleDelta,
+                partial: output,
+              });
+            }
+          }
+
+          const reasoningDelta = extractStreamingReasoning(delta);
+          if (reasoningDelta) {
+            sawAssistantOutput = true;
+            finishOpenToolCallBlocks();
+            if (!currentBlock || currentBlock.type !== "thinking") {
+              finishCurrentBlock();
+              currentBlock = {
+                type: "thinking",
+                thinking: "",
+                thinkingSignature: "reasoning_content",
+              };
+              output.content.push(currentBlock);
+              stream.push({ type: "thinking_start", contentIndex: blockIndex(), partial: output });
+            }
+            currentBlock.thinking += reasoningDelta;
+            stream.push({
+              type: "thinking_delta",
+              contentIndex: blockIndex(),
+              delta: reasoningDelta,
+              partial: output,
+            });
+          }
+
+          if (Array.isArray(delta.tool_calls)) {
+            if (delta.tool_calls.length > 0) {
+              sawAssistantOutput = true;
+            }
+            finishCurrentBlock();
+            for (const toolCall of delta.tool_calls as OpenAIStyleToolCall[]) {
+              const nextIndex = resolveToolCallChunkIndex(toolCall);
+              const nextId = typeof toolCall.id === "string" ? toolCall.id : "";
+              const indexKey = nextIndex !== null ? `index:${nextIndex}` : null;
+              const idKey = nextId ? `id:${nextId}` : null;
+              let state =
+                (indexKey ? activeToolCallStates.get(indexKey) : undefined) ??
+                (idKey ? activeToolCallStates.get(idKey) : undefined);
+              if (!state) {
+                const block: StreamingToolCallBlock = {
+                  type: "toolCall",
+                  id: nextId,
+                  name:
+                    toolCall.function && typeof toolCall.function === "object"
+                      ? typeof toolCall.function.name === "string"
+                        ? toolCall.function.name
+                        : ""
+                      : "",
+                  arguments: {},
+                  partialArgs: "",
+                };
+                output.content.push(block);
+                state = {
+                  block,
+                  contentIndex: blockIndex(),
+                };
                 stream.push({
-                  type: "toolcall_delta",
+                  type: "toolcall_start",
                   contentIndex: state.contentIndex,
-                  delta: argsDelta,
                   partial: output,
                 });
               }
+              if (indexKey) {
+                activeToolCallStates.set(indexKey, state);
+              }
+              if (idKey) {
+                activeToolCallStates.set(idKey, state);
+              }
+              const currentToolCall = state.block;
+              if (nextId) {
+                currentToolCall.id = nextId;
+              }
+              if (toolCall.function && typeof toolCall.function === "object") {
+                if (typeof toolCall.function.name === "string") {
+                  currentToolCall.name = toolCall.function.name;
+                }
+                const argsDelta =
+                  typeof toolCall.function.arguments === "string" ? toolCall.function.arguments : "";
+                if (argsDelta) {
+                  currentToolCall.partialArgs += argsDelta;
+                  stream.push({
+                    type: "toolcall_delta",
+                    contentIndex: state.contentIndex,
+                    delta: argsDelta,
+                    partial: output,
+                  });
+                }
+              }
             }
           }
-        }
 
-        if (Array.isArray(delta.reasoning_details)) {
-          for (const detail of delta.reasoning_details as Array<Record<string, unknown>>) {
-            if (
-              detail?.type === "reasoning.encrypted" &&
-              typeof detail.id === "string" &&
-              detail.data !== undefined
-            ) {
-              const matchingToolCall = output.content.find(
-                (block) => block.type === "toolCall" && block.id === detail.id,
-              );
-              if (matchingToolCall && matchingToolCall.type === "toolCall") {
-                matchingToolCall.thoughtSignature = JSON.stringify(detail);
+          if (Array.isArray(delta.reasoning_details)) {
+            for (const detail of delta.reasoning_details as Array<Record<string, unknown>>) {
+              if (
+                detail?.type === "reasoning.encrypted" &&
+                typeof detail.id === "string" &&
+                detail.data !== undefined
+              ) {
+                const matchingToolCall = output.content.find(
+                  (block) => block.type === "toolCall" && block.id === detail.id,
+                );
+                if (matchingToolCall && matchingToolCall.type === "toolCall") {
+                  matchingToolCall.thoughtSignature = JSON.stringify(detail);
+                }
               }
             }
           }
         }
-      }
 
-      finishOpenToolCallBlocks();
-      finishCurrentBlock();
-      normalizePlamoToolMarkupInMessage(output);
-      stripPlamoStreamingInternalsInMessage(output);
+        finishOpenToolCallBlocks();
+        finishCurrentBlock();
+        normalizePlamoToolMarkupInMessage(output);
+        stripPlamoStreamingInternalsInMessage(output);
 
-      if (options?.signal?.aborted) {
-        throw new Error("Request was aborted");
-      }
-      if (output.stopReason === "aborted") {
-        throw new Error("Request was aborted");
-      }
-      if (output.stopReason === "error") {
-        throw new Error(output.errorMessage || "Provider returned an error stop reason");
-      }
-      if (!sawFinishReason) {
-        throw new Error("PLaMo stream ended before a finish_reason was received");
-      }
+        if (options?.signal?.aborted) {
+          throw new Error("Request was aborted");
+        }
+        if (output.stopReason === "aborted") {
+          throw new Error("Request was aborted");
+        }
+        if (output.stopReason === "error") {
+          throw new Error(output.errorMessage || "Provider returned an error stop reason");
+        }
+        if (!sawFinishReason && !sawAssistantOutput) {
+          if (attemptIndex < PLAMO_EMPTY_STREAM_MAX_RETRIES) {
+            try {
+              await reader.cancel();
+            } catch {
+              // ignore reader cleanup failures before retry
+            }
+            reader = null;
+            continue;
+          }
+          throw new Error(
+            sawCompletionChunk
+              ? "PLaMo stream ended without assistant output or a finish_reason"
+              : "PLaMo stream ended without any completion chunks or a finish_reason",
+          );
+        }
 
-      stream.push({ type: "done", reason: output.stopReason, message: output });
-      stream.end();
+        stream.push({ type: "done", reason: output.stopReason, message: output });
+        stream.end();
+        return;
+      }
     } catch (error) {
       const aborted =
         options?.signal?.aborted || (error instanceof Error && error.name === "AbortError");
