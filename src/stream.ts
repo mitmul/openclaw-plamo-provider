@@ -28,6 +28,8 @@ const PLAMO_BEGIN_TOOL_NAME = "<|plamo:begin_tool_name:plamo|>";
 const PLAMO_END_TOOL_NAME = "<|plamo:end_tool_name:plamo|>";
 const PLAMO_BEGIN_TOOL_ARGUMENTS = "<|plamo:begin_tool_arguments:plamo|>";
 const PLAMO_END_TOOL_ARGUMENTS = "<|plamo:end_tool_arguments:plamo|>";
+const PLAMO_BEGIN_THINK = "<|plamo:begin_think:plamo|>";
+const PLAMO_END_THINK = "<|plamo:end_think:plamo|>";
 const PLAMO_MSG = "<|plamo:msg|>";
 const PLAMO_TAG_TOKENS = [
   PLAMO_BEGIN_TOOL_REQUEST,
@@ -38,8 +40,11 @@ const PLAMO_TAG_TOKENS = [
   PLAMO_END_TOOL_NAME,
   PLAMO_BEGIN_TOOL_ARGUMENTS,
   PLAMO_END_TOOL_ARGUMENTS,
+  PLAMO_BEGIN_THINK,
+  PLAMO_END_THINK,
   PLAMO_MSG,
 ] as const;
+const PLAMO_THINK_TAG_TOKENS = [PLAMO_BEGIN_THINK, PLAMO_END_THINK] as const;
 const PLAMO_SYNTHETIC_TURN_SEED_SYMBOL = Symbol("openclaw.plamoSyntheticTurnSeed");
 const PLAMO_EMPTY_STREAM_MAX_RETRIES = 1;
 
@@ -92,6 +97,14 @@ type StreamingTextBlock = {
   text: string;
   rawText?: string;
   streamStarted?: boolean;
+};
+type PlamoTaggedThinkingTextState = {
+  pending: string;
+  inThinking: boolean;
+};
+type PlamoTaggedThinkingTextSegment = {
+  type: "text" | "thinking";
+  text: string;
 };
 
 type OpenAIStyleToolCall = {
@@ -188,6 +201,17 @@ function dropPlamoThinkingBlocks(messages: AgentMessage[]): AgentMessage[] {
         touched = true;
         changed = true;
         continue;
+      }
+      if (isTextBlock(block)) {
+        const strippedText = stripPlamoTaggedThinkingFromText(block.text);
+        if (strippedText !== block.text) {
+          touched = true;
+          changed = true;
+          if (strippedText) {
+            nextContent.push({ ...block, text: strippedText });
+          }
+          continue;
+        }
       }
       nextContent.push(block);
     }
@@ -374,9 +398,12 @@ function isIndexWithinRanges(index: number, ranges: readonly TextRange[]): boole
   return ranges.some(([start, end]) => index >= start && index < end);
 }
 
-function resolveTrailingPlamoTagPrefixLength(text: string): number {
+function resolveTrailingTokenPrefixLength(
+  text: string,
+  tokens: readonly string[] = PLAMO_TAG_TOKENS,
+): number {
   let longestPrefix = 0;
-  for (const token of PLAMO_TAG_TOKENS) {
+  for (const token of tokens) {
     const maxPrefixLength = Math.min(text.length, token.length - 1);
     for (let prefixLength = maxPrefixLength; prefixLength > longestPrefix; prefixLength -= 1) {
       if (token.startsWith(text.slice(-prefixLength))) {
@@ -386,6 +413,81 @@ function resolveTrailingPlamoTagPrefixLength(text: string): number {
     }
   }
   return longestPrefix;
+}
+
+function resolveTrailingPlamoTagPrefixLength(text: string): number {
+  return resolveTrailingTokenPrefixLength(text);
+}
+
+function createPlamoTaggedThinkingTextState(): PlamoTaggedThinkingTextState {
+  return { pending: "", inThinking: false };
+}
+
+function consumePlamoTaggedThinkingText(
+  state: PlamoTaggedThinkingTextState,
+  text: string,
+  options?: { flush?: boolean },
+): PlamoTaggedThinkingTextSegment[] {
+  let remaining = `${state.pending}${text}`;
+  state.pending = "";
+  const segments: PlamoTaggedThinkingTextSegment[] = [];
+
+  while (remaining.length > 0) {
+    const boundary = state.inThinking ? PLAMO_END_THINK : PLAMO_BEGIN_THINK;
+    const boundaryIndex = remaining.indexOf(boundary);
+    if (boundaryIndex === -1) {
+      const pendingPrefixLength = options?.flush
+        ? 0
+        : resolveTrailingTokenPrefixLength(remaining, [boundary]);
+      const emitEnd = remaining.length - pendingPrefixLength;
+      const segmentText = remaining.slice(0, emitEnd);
+      if (segmentText) {
+        segments.push({
+          type: state.inThinking ? "thinking" : "text",
+          text: segmentText,
+        });
+      }
+      state.pending = remaining.slice(emitEnd);
+      break;
+    }
+
+    const segmentText = remaining.slice(0, boundaryIndex);
+    if (segmentText) {
+      segments.push({
+        type: state.inThinking ? "thinking" : "text",
+        text: segmentText,
+      });
+    }
+    remaining = remaining.slice(boundaryIndex + boundary.length);
+    state.inThinking = !state.inThinking;
+  }
+
+  return segments;
+}
+
+function flushPlamoTaggedThinkingText(
+  state: PlamoTaggedThinkingTextState,
+): PlamoTaggedThinkingTextSegment[] {
+  const pending = state.pending;
+  if (!pending) {
+    return [];
+  }
+  state.pending = "";
+  if (PLAMO_THINK_TAG_TOKENS.some((token) => token.startsWith(pending))) {
+    return [];
+  }
+  return [{ type: state.inThinking ? "thinking" : "text", text: pending }];
+}
+
+function stripPlamoTaggedThinkingFromText(text: string): string {
+  if (!text.includes(PLAMO_BEGIN_THINK) && !text.includes(PLAMO_END_THINK)) {
+    return text;
+  }
+  const state = createPlamoTaggedThinkingTextState();
+  return consumePlamoTaggedThinkingText(state, text, { flush: true })
+    .filter((segment) => segment.type === "text")
+    .map((segment) => segment.text)
+    .join("");
 }
 
 function findFirstIncompletePlamoMarkupStart(
@@ -1085,6 +1187,7 @@ function createNativePlamoStream(
         const activeToolCallStates = new Map<string, ActiveToolCallState>();
         const blocks = output.content;
         const blockIndex = () => blocks.length - 1;
+        const taggedThinkingTextState = createPlamoTaggedThinkingTextState();
         const finishOpenToolCallBlocks = () => {
           const states = [...new Set(activeToolCallStates.values())];
           activeToolCallStates.clear();
@@ -1139,6 +1242,81 @@ function createNativePlamoStream(
           }
           currentBlock = null;
         };
+        const emitTextDelta = (textDelta: string) => {
+          if (!textDelta) {
+            return;
+          }
+          sawAssistantOutput = true;
+          finishOpenToolCallBlocks();
+          if (!currentBlock || currentBlock.type !== "text") {
+            finishCurrentBlock();
+            currentBlock = { type: "text", text: "", rawText: "", streamStarted: false };
+            output.content.push(currentBlock);
+          }
+          const previousVisibleText = currentBlock.text;
+          currentBlock.rawText = `${resolveStreamingTextBlockRawText(currentBlock)}${textDelta}`;
+          const nextVisibleText = resolveStreamingVisiblePlamoText(currentBlock.rawText);
+          const stableVisibleText =
+            nextVisibleText.length >= previousVisibleText.length
+              ? nextVisibleText
+              : previousVisibleText;
+          currentBlock.text = stableVisibleText;
+          if (!currentBlock.streamStarted && stableVisibleText.length > 0) {
+            currentBlock.streamStarted = true;
+            stream.push({ type: "text_start", contentIndex: blockIndex(), partial: output });
+          }
+          const visibleDelta = stableVisibleText.slice(previousVisibleText.length);
+          if (visibleDelta) {
+            stream.push({
+              type: "text_delta",
+              contentIndex: blockIndex(),
+              delta: visibleDelta,
+              partial: output,
+            });
+          }
+        };
+        const emitThinkingDelta = (reasoningDelta: string, thinkingSignature: string) => {
+          if (!reasoningDelta) {
+            return;
+          }
+          sawAssistantOutput = true;
+          finishOpenToolCallBlocks();
+          if (!currentBlock || currentBlock.type !== "thinking") {
+            finishCurrentBlock();
+            currentBlock = {
+              type: "thinking",
+              thinking: "",
+              thinkingSignature,
+            };
+            output.content.push(currentBlock);
+            stream.push({ type: "thinking_start", contentIndex: blockIndex(), partial: output });
+          }
+          currentBlock.thinking += reasoningDelta;
+          stream.push({
+            type: "thinking_delta",
+            contentIndex: blockIndex(),
+            delta: reasoningDelta,
+            partial: output,
+          });
+        };
+        const emitTaggedThinkingTextDelta = (textDelta: string) => {
+          for (const segment of consumePlamoTaggedThinkingText(taggedThinkingTextState, textDelta)) {
+            if (segment.type === "thinking") {
+              emitThinkingDelta(segment.text, "plamo_tagged_thinking");
+            } else {
+              emitTextDelta(segment.text);
+            }
+          }
+        };
+        const flushTaggedThinkingText = () => {
+          for (const segment of flushPlamoTaggedThinkingText(taggedThinkingTextState)) {
+            if (segment.type === "thinking") {
+              emitThinkingDelta(segment.text, "plamo_tagged_thinking");
+            } else {
+              emitTextDelta(segment.text);
+            }
+          }
+        };
 
         for await (const rawChunk of parseSsePayloads(reader)) {
           const chunk = parseStreamingChunk(rawChunk);
@@ -1177,63 +1355,19 @@ function createNativePlamoStream(
 
           const textDelta = typeof delta.content === "string" ? delta.content : "";
           if (textDelta) {
-            sawAssistantOutput = true;
-            finishOpenToolCallBlocks();
-            if (!currentBlock || currentBlock.type !== "text") {
-              finishCurrentBlock();
-              currentBlock = { type: "text", text: "", rawText: "", streamStarted: false };
-              output.content.push(currentBlock);
-            }
-            const previousVisibleText = currentBlock.text;
-            currentBlock.rawText = `${resolveStreamingTextBlockRawText(currentBlock)}${textDelta}`;
-            const nextVisibleText = resolveStreamingVisiblePlamoText(currentBlock.rawText);
-            const stableVisibleText =
-              nextVisibleText.length >= previousVisibleText.length
-                ? nextVisibleText
-                : previousVisibleText;
-            currentBlock.text = stableVisibleText;
-            if (!currentBlock.streamStarted && stableVisibleText.length > 0) {
-              currentBlock.streamStarted = true;
-              stream.push({ type: "text_start", contentIndex: blockIndex(), partial: output });
-            }
-            const visibleDelta = stableVisibleText.slice(previousVisibleText.length);
-            if (visibleDelta) {
-              stream.push({
-                type: "text_delta",
-                contentIndex: blockIndex(),
-                delta: visibleDelta,
-                partial: output,
-              });
-            }
+            emitTaggedThinkingTextDelta(textDelta);
           }
 
           const reasoningDelta = extractStreamingReasoning(delta);
           if (reasoningDelta) {
-            sawAssistantOutput = true;
-            finishOpenToolCallBlocks();
-            if (!currentBlock || currentBlock.type !== "thinking") {
-              finishCurrentBlock();
-              currentBlock = {
-                type: "thinking",
-                thinking: "",
-                thinkingSignature: "reasoning_content",
-              };
-              output.content.push(currentBlock);
-              stream.push({ type: "thinking_start", contentIndex: blockIndex(), partial: output });
-            }
-            currentBlock.thinking += reasoningDelta;
-            stream.push({
-              type: "thinking_delta",
-              contentIndex: blockIndex(),
-              delta: reasoningDelta,
-              partial: output,
-            });
+            emitThinkingDelta(reasoningDelta, "reasoning_content");
           }
 
           if (Array.isArray(delta.tool_calls)) {
             if (delta.tool_calls.length > 0) {
               sawAssistantOutput = true;
             }
+            flushTaggedThinkingText();
             finishCurrentBlock();
             for (const toolCall of delta.tool_calls as OpenAIStyleToolCall[]) {
               const nextIndex = resolveToolCallChunkIndex(toolCall);
@@ -1314,6 +1448,7 @@ function createNativePlamoStream(
           }
         }
 
+        flushTaggedThinkingText();
         finishOpenToolCallBlocks();
         finishCurrentBlock();
         normalizePlamoToolMarkupInMessage(output);

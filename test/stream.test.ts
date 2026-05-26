@@ -135,4 +135,113 @@ describe("PLaMo native stream handling", () => {
       content: [{ type: "text", text: "retry ok" }],
     });
   });
+
+  it("separates PLaMo tagged thinking from visible content", async () => {
+    mocks.responses.push(
+      sseResponse(
+        {
+          id: "chatcmpl-tagged-thinking",
+          choices: [
+            {
+              delta: {
+                content:
+                  "<|plamo:begin_think:plamo|>hidden reasoning<|plamo:end_think:plamo|>visible answer",
+              },
+              finish_reason: null,
+            },
+          ],
+        },
+        {
+          id: "chatcmpl-tagged-thinking",
+          choices: [
+            {
+              delta: {},
+              finish_reason: "stop",
+            },
+          ],
+        },
+        "[DONE]",
+      ),
+    );
+
+    const { events, message } = await runNativePlamoStream();
+
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: "thinking_delta", delta: "hidden reasoning" }),
+        expect.objectContaining({ type: "text_delta", delta: "visible answer" }),
+      ]),
+    );
+    expect(message).toMatchObject({
+      stopReason: "stop",
+      content: [
+        {
+          type: "thinking",
+          thinking: "hidden reasoning",
+          thinkingSignature: "plamo_tagged_thinking",
+        },
+        { type: "text", text: "visible answer" },
+      ],
+    });
+  });
+
+  it("keeps split PLaMo thinking tags out of visible text", async () => {
+    mocks.responses.push(
+      sseResponse(
+        {
+          id: "chatcmpl-split-tagged-thinking",
+          choices: [
+            {
+              delta: { content: "before <|plamo:begin_" },
+              finish_reason: null,
+            },
+          ],
+        },
+        {
+          id: "chatcmpl-split-tagged-thinking",
+          choices: [
+            {
+              delta: { content: "think:plamo|>hidden" },
+              finish_reason: null,
+            },
+          ],
+        },
+        {
+          id: "chatcmpl-split-tagged-thinking",
+          choices: [
+            {
+              delta: { content: " reasoning<|plamo:end_" },
+              finish_reason: null,
+            },
+          ],
+        },
+        {
+          id: "chatcmpl-split-tagged-thinking",
+          choices: [
+            {
+              delta: { content: "think:plamo|> after" },
+              finish_reason: "stop",
+            },
+          ],
+        },
+        "[DONE]",
+      ),
+    );
+
+    const { message } = await runNativePlamoStream();
+
+    expect(message).toMatchObject({
+      stopReason: "stop",
+      content: [
+        { type: "text", text: "before " },
+        {
+          type: "thinking",
+          thinking: "hidden reasoning",
+          thinkingSignature: "plamo_tagged_thinking",
+        },
+        { type: "text", text: " after" },
+      ],
+    });
+    expect(JSON.stringify(message.content)).not.toContain("<|plamo:");
+  });
 });
