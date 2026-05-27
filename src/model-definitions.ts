@@ -15,6 +15,7 @@ export const PLAMO_OPENAI_COMPAT = {
   maxTokensField: "max_tokens",
   supportsDeveloperRole: false,
   supportsReasoningEffort: false,
+  supportsTools: true,
   supportsStore: false,
   supportsStrictMode: false,
 } as const satisfies NonNullable<ModelDefinitionConfig["compat"]>;
