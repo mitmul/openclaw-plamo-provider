@@ -1,6 +1,6 @@
 {
   "name": "@mitmul/openclaw-plamo-provider",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "OpenClaw provider plugin for Preferred Networks PLaMo",
   "license": "MIT",
   "type": "module",
@@ -62,7 +62,9 @@
     },
     "security": {
       "primaryCredential": "PLAMO_API_KEY",
-      "requiredEnv": ["PLAMO_API_KEY"],
+      "requiredEnv": [
+        "PLAMO_API_KEY"
+      ],
       "optionalEnv": [],
       "localPayloadDumps": false
     }
@@ -70,7 +72,9 @@
   "clawhub": {
     "security": {
       "primaryCredential": "PLAMO_API_KEY",
-      "requiredEnv": ["PLAMO_API_KEY"],
+      "requiredEnv": [
+        "PLAMO_API_KEY"
+      ],
       "optionalEnv": [],
       "localPayloadDumps": false
     }
