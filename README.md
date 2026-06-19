@@ -23,7 +23,7 @@ Use the onboarding flag or set `PLAMO_API_KEY`:
 openclaw onboard --plamo-api-key <key>
 ```
 
-The default model is `plamo/plamo-3.0-prime-beta`. Uncataloged model IDs with
+The default model is `plamo/plamo-3.0-prime`. Uncataloged model IDs with
 the `plamo-` prefix are accepted through dynamic model resolution so newer
 PLaMo model names can be used before the local catalog is refreshed.
 

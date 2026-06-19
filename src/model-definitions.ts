@@ -1,7 +1,7 @@
 import type { ModelDefinitionConfig } from "openclaw/plugin-sdk/provider-model-shared";
 
 export const PLAMO_BASE_URL = "https://api.platform.preferredai.jp/v1";
-export const PLAMO_DEFAULT_MODEL_ID = "plamo-3.0-prime-beta";
+export const PLAMO_DEFAULT_MODEL_ID = "plamo-3.0-prime";
 export const PLAMO_DEFAULT_MODEL_REF = `plamo/${PLAMO_DEFAULT_MODEL_ID}`;
 export const PLAMO_DEFAULT_CONTEXT_WINDOW = 65_536;
 export const PLAMO_DEFAULT_MAX_TOKENS = 20_000;
@@ -23,7 +23,7 @@ export const PLAMO_OPENAI_COMPAT = {
 const PLAMO_MODEL_CATALOG = [
   {
     id: PLAMO_DEFAULT_MODEL_ID,
-    name: "PLaMo 3.0 Prime Beta",
+    name: "PLaMo 3.0 Prime",
     // PLaMo returns `reasoning_content`, but the public API does not expose a
     // request-side reasoning toggle. In OpenClaw, `reasoning: true` means "the
     // caller can opt into provider-controlled reasoning mode", so keep this
