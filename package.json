@@ -37,10 +37,10 @@
     "@mariozechner/pi-ai": "0.70.2"
   },
   "devDependencies": {
-    "@types/node": "^22.15.0",
+    "@types/node": "^22.19.21",
     "openclaw": "2026.4.24",
     "typescript": "^5.9.3",
-    "vitest": "^4.0.0"
+    "vitest": "^4.1.9"
   },
   "openclaw": {
     "extensions": [
