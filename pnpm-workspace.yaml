@@ -1,0 +1,6 @@
+allowBuilds:
+  '@google/genai': true
+  koffi: false
+  openclaw: true
+  protobufjs: true
+  sharp: true
