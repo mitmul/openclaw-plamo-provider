@@ -8,28 +8,40 @@ export const PLAMO_DEFAULT_MAX_TOKENS = 20_000;
 export const PLAMO_PRICE_USD_PER_1M_INPUT = 0.375;
 export const PLAMO_PRICE_USD_PER_1M_OUTPUT = 1.5625;
 export const PLAMO_MODEL_INPUT = ["text"] as const;
+export const PLAMO_REASONING_EFFORT_MAP = {
+  off: "none",
+  minimal: "medium",
+  low: "medium",
+  medium: "medium",
+  high: "medium",
+  xhigh: "medium",
+  adaptive: "medium",
+  max: "medium",
+} as const;
+
+type PlamoModelCompat = NonNullable<ModelDefinitionConfig["compat"]> & {
+  reasoningEffortMap: typeof PLAMO_REASONING_EFFORT_MAP;
+};
 
 export const PLAMO_OPENAI_COMPAT = {
   // PLaMo's Chat Completions reference documents only `system`/`user`/`assistant`
   // roles, `max_tokens`, and the legacy tool schema without `strict`/`store`.
   maxTokensField: "max_tokens",
   supportsDeveloperRole: false,
-  supportsReasoningEffort: false,
+  supportsReasoningEffort: true,
+  reasoningEffortMap: PLAMO_REASONING_EFFORT_MAP,
   supportsTools: true,
   supportsStore: false,
   supportsStrictMode: false,
-} as const satisfies NonNullable<ModelDefinitionConfig["compat"]>;
+} as const satisfies PlamoModelCompat;
 
 const PLAMO_MODEL_CATALOG = [
   {
     id: PLAMO_DEFAULT_MODEL_ID,
     name: "PLaMo 3.0 Prime",
-    // PLaMo returns `reasoning_content`, but the public API does not expose a
-    // request-side reasoning toggle. In OpenClaw, `reasoning: true` means "the
-    // caller can opt into provider-controlled reasoning mode", so keep this
-    // false and treat the streamed reasoning payload as an always-on side
-    // channel instead.
-    reasoning: false,
+    // PLaMo accepts `reasoning_effort` values `none` and `medium`. OpenClaw's
+    // richer thinking levels are normalized through PLAMO_REASONING_EFFORT_MAP.
+    reasoning: true,
     input: [...PLAMO_MODEL_INPUT],
     // Converted from JPY pricing using a fixed 1 USD = 160 JPY assumption.
     cost: {

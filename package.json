@@ -30,15 +30,14 @@
     "llm-provider"
   ],
   "peerDependencies": {
-    "openclaw": ">=2026.4.24"
+    "openclaw": ">=2026.6.8"
   },
   "dependencies": {
-    "@mariozechner/pi-agent-core": "0.70.2",
     "@mariozechner/pi-ai": "0.70.2"
   },
   "devDependencies": {
     "@types/node": "^22.19.21",
-    "openclaw": "2026.4.24",
+    "openclaw": "2026.6.8",
     "typescript": "^5.9.3",
     "vitest": "^4.1.9"
   },
@@ -53,12 +52,12 @@
       "plamo"
     ],
     "compat": {
-      "pluginApi": ">=2026.4.24",
-      "minGatewayVersion": "2026.4.24"
+      "pluginApi": ">=2026.6.8",
+      "minGatewayVersion": "2026.6.8"
     },
     "build": {
-      "openclawVersion": "2026.4.24",
-      "pluginSdkVersion": "2026.4.24"
+      "openclawVersion": "2026.6.8",
+      "pluginSdkVersion": "2026.6.8"
     },
     "security": {
       "primaryCredential": "PLAMO_API_KEY",

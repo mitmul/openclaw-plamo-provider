@@ -1,22 +1,22 @@
 import { createHash } from "node:crypto";
-import type { AgentMessage, StreamFn } from "@mariozechner/pi-agent-core";
 import {
   calculateCost,
   createAssistantMessageEventStream,
   streamSimple,
   type AssistantMessage,
   type AssistantMessageEventStream,
-  type OpenAICompletionsCompat,
   type StopReason,
   type Tool,
   type ToolCall,
   type Usage,
-} from "@mariozechner/pi-ai";
+} from "openclaw/plugin-sdk/llm";
+import type { AgentMessage, StreamFn } from "openclaw/plugin-sdk/agent-core";
 import { convertMessages } from "@mariozechner/pi-ai/openai-completions";
 import { resolveEnvApiKey } from "openclaw/plugin-sdk/provider-auth-runtime";
 import {
   buildGuardedModelFetch,
 } from "openclaw/plugin-sdk/provider-transport-runtime";
+import { PLAMO_REASONING_EFFORT_MAP } from "./model-definitions.js";
 import { PLAMO_REQUEST_AUTH_MARKER } from "./provider-catalog.js";
 import { normalizeOpenAICompatibleToolParameters } from "./tool-schema.js";
 
@@ -76,8 +76,27 @@ type AssistantContentBlock = Extract<AgentMessage, { role: "assistant" }>["conte
 type RuntimeModel = Parameters<StreamFn>[0];
 type RuntimeContext = Parameters<StreamFn>[1];
 type RuntimeOptions = Parameters<StreamFn>[2];
-type ResolvedPlamoCompat = Required<Omit<OpenAICompletionsCompat, "cacheControlFormat">> &
-  Pick<OpenAICompletionsCompat, "cacheControlFormat">;
+type PlamoAssistantStream = Awaited<ReturnType<StreamFn>>;
+type ResolvedPlamoCompat = {
+  supportsStore: boolean;
+  supportsDeveloperRole: boolean;
+  supportsReasoningEffort: boolean;
+  reasoningEffortMap: Record<string, string>;
+  supportsUsageInStreaming: boolean;
+  maxTokensField: "max_tokens" | "max_completion_tokens";
+  requiresToolResultName: boolean;
+  requiresAssistantAfterToolResult: boolean;
+  requiresThinkingAsText: boolean;
+  requiresReasoningContentOnAssistantMessages: boolean;
+  thinkingFormat: string;
+  openRouterRouting: Record<string, unknown>;
+  vercelGatewayRouting: Record<string, unknown>;
+  zaiToolStream: boolean;
+  supportsStrictMode: boolean;
+  sendSessionAffinityHeaders: boolean;
+  supportsLongCacheRetention: boolean;
+  cacheControlFormat?: unknown;
+};
 type TextRange = readonly [start: number, end: number];
 type ReplayToolCallBlock = {
   type?: unknown;
@@ -139,8 +158,8 @@ type OpenAIStyleChunk = {
 const DEFAULT_PLAMO_COMPAT: ResolvedPlamoCompat = {
   supportsStore: false,
   supportsDeveloperRole: false,
-  supportsReasoningEffort: false,
-  reasoningEffortMap: {},
+  supportsReasoningEffort: true,
+  reasoningEffortMap: PLAMO_REASONING_EFFORT_MAP,
   supportsUsageInStreaming: false,
   maxTokensField: "max_tokens",
   requiresToolResultName: false,
@@ -614,7 +633,7 @@ function buildNormalizedParsedPlamoToolCalls(
 }
 
 function resolvePlamoCompat(model: RuntimeModel): ResolvedPlamoCompat {
-  const compat = (model as { compat?: OpenAICompletionsCompat }).compat;
+  const compat = (model as { compat?: Partial<ResolvedPlamoCompat> }).compat;
   return {
     ...DEFAULT_PLAMO_COMPAT,
     ...compat,
@@ -622,6 +641,36 @@ function resolvePlamoCompat(model: RuntimeModel): ResolvedPlamoCompat {
     openRouterRouting: compat?.openRouterRouting ?? DEFAULT_PLAMO_COMPAT.openRouterRouting,
     vercelGatewayRouting: compat?.vercelGatewayRouting ?? DEFAULT_PLAMO_COMPAT.vercelGatewayRouting,
   };
+}
+
+function resolvePlamoReasoningEffort(rawEffort: unknown, compat: ResolvedPlamoCompat): string | undefined {
+  if (!compat.supportsReasoningEffort || typeof rawEffort !== "string") {
+    return undefined;
+  }
+  const normalized = rawEffort.trim().toLowerCase();
+  if (!normalized) {
+    return undefined;
+  }
+  const mappedEffort = compat.reasoningEffortMap[normalized as keyof typeof compat.reasoningEffortMap];
+  if (typeof mappedEffort === "string" && mappedEffort.trim().length > 0) {
+    return mappedEffort.trim();
+  }
+  if (normalized === "off" || normalized === "none") {
+    return "none";
+  }
+  return "medium";
+}
+
+function resolvePlamoOptionsReasoningEffort(
+  options: RuntimeOptions,
+  compat: ResolvedPlamoCompat,
+): string | undefined {
+  const rawReasoningEffort = (options as { reasoningEffort?: unknown } | undefined)?.reasoningEffort;
+  const rawReasoning = (options as { reasoning?: unknown } | undefined)?.reasoning;
+  return (
+    resolvePlamoReasoningEffort(rawReasoningEffort, compat) ??
+    resolvePlamoReasoningEffort(rawReasoning, compat)
+  );
 }
 
 function hasToolHistory(messages: AgentMessage[]): boolean {
@@ -656,7 +705,7 @@ function buildPlamoStreamingPayload(
   const compat = resolvePlamoCompat(model);
   const params: Record<string, unknown> = {
     model: model.id,
-    messages: convertMessages(model as never, context as never, compat),
+    messages: convertMessages(model as never, context as never, compat as never),
     stream: true,
   };
 
@@ -670,6 +719,10 @@ function buildPlamoStreamingPayload(
   }
   if (options?.temperature !== undefined) {
     params.temperature = options.temperature;
+  }
+  const reasoningEffort = resolvePlamoOptionsReasoningEffort(options, compat);
+  if (reasoningEffort && model.reasoning && compat.supportsReasoningEffort) {
+    params.reasoning_effort = reasoningEffort;
   }
   if (context.tools) {
     params.tools = convertTools(context.tools, compat);
@@ -694,6 +747,11 @@ function normalizePlamoStreamingPayload(
   }
   if (!compat.supportsReasoningEffort) {
     delete payload.reasoning_effort;
+  } else {
+    const reasoningEffort = resolvePlamoReasoningEffort(payload.reasoning_effort, compat);
+    if (reasoningEffort) {
+      payload.reasoning_effort = reasoningEffort;
+    }
   }
   injectPlamoMaxTokens(payload, model, compat);
 
@@ -1713,9 +1771,9 @@ function clonePlamoNormalizationSnapshot<T>(value: T): T {
 }
 
 function wrapStreamNormalizePlamoToolMarkup(
-  stream: ReturnType<typeof streamSimple>,
+  stream: PlamoAssistantStream,
   options?: { normalizePartial?: boolean },
-): ReturnType<typeof streamSimple> {
+): PlamoAssistantStream {
   const normalizationTurnSeed = createHash("sha256")
     .update(String(Date.now()))
     .update("\0")
