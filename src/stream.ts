@@ -11,7 +11,7 @@ import {
   type Usage,
 } from "openclaw/plugin-sdk/llm";
 import type { AgentMessage, StreamFn } from "openclaw/plugin-sdk/agent-core";
-import { convertMessages } from "@mariozechner/pi-ai/openai-completions";
+import { convertMessages } from "@earendil-works/pi-ai/openai-completions";
 import { resolveEnvApiKey } from "openclaw/plugin-sdk/provider-auth-runtime";
 import {
   buildGuardedModelFetch,
