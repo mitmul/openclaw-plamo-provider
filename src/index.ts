@@ -1,4 +1,7 @@
-import type { ProviderResolveDynamicModelContext } from "openclaw/plugin-sdk/plugin-entry";
+import type {
+  OpenClawPluginDefinition,
+  ProviderResolveDynamicModelContext,
+} from "openclaw/plugin-sdk/plugin-entry";
 import { defineSingleProviderPluginEntry } from "openclaw/plugin-sdk/provider-entry";
 import {
   buildProviderReplayFamilyHooks,
@@ -46,7 +49,7 @@ function resolvePlamoDynamicModel(ctx: ProviderResolveDynamicModelContext) {
       patch: {
         provider: PROVIDER_ID,
         api: "openai-completions",
-        reasoning: false,
+        reasoning: true,
       },
     }) ??
     normalizeModelCompat({
@@ -55,7 +58,7 @@ function resolvePlamoDynamicModel(ctx: ProviderResolveDynamicModelContext) {
       provider: PROVIDER_ID,
       api: "openai-completions",
       baseUrl: ctx.providerConfig?.baseUrl ?? PLAMO_BASE_URL,
-      reasoning: false,
+      reasoning: true,
       input: [...PLAMO_MODEL_INPUT],
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
       contextWindow: PLAMO_DEFAULT_CONTEXT_WINDOW,
@@ -65,7 +68,7 @@ function resolvePlamoDynamicModel(ctx: ProviderResolveDynamicModelContext) {
   );
 }
 
-export default defineSingleProviderPluginEntry({
+const plugin: OpenClawPluginDefinition = defineSingleProviderPluginEntry({
   id: PROVIDER_ID,
   name: "Preferred Networks Provider",
   description: "Preferred Networks model provider plugin for PLaMo",
@@ -117,3 +120,5 @@ export default defineSingleProviderPluginEntry({
     createStreamFn: () => createPlamoToolCallWrapper(undefined),
   },
 });
+
+export default plugin;

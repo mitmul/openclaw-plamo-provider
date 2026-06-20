@@ -4,3 +4,4 @@ allowBuilds:
   openclaw: true
   protobufjs: true
   sharp: true
+  tree-sitter-bash: false

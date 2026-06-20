@@ -1,4 +1,4 @@
-import type { Context, Model } from "@mariozechner/pi-ai";
+import type { Context, Model } from "openclaw/plugin-sdk/llm";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => {
@@ -27,7 +27,7 @@ const model: Model<"openai-completions"> = {
   api: "openai-completions",
   provider: "plamo",
   baseUrl: "https://api.example.test/v1",
-  reasoning: false,
+  reasoning: true,
   input: ["text"],
   cost: {
     input: 0,
@@ -59,9 +59,9 @@ function sseResponse(...payloads: Array<Record<string, unknown> | "[DONE]">): Re
   });
 }
 
-async function runNativePlamoStream() {
+async function runNativePlamoStream(options: Record<string, unknown> = {}) {
   const { createPlamoToolCallWrapper } = await import("../src/stream.js");
-  const stream = createPlamoToolCallWrapper(undefined)(model, context, {});
+  const stream = createPlamoToolCallWrapper(undefined)(model, context, options);
   const events = [];
   for await (const event of stream) {
     events.push(event);
@@ -99,6 +99,83 @@ describe("PLaMo native stream handling", () => {
       stopReason: "stop",
       content: [{ type: "text", text: "hello from plamo" }],
     });
+  });
+
+  it("maps OpenClaw thinking levels to PLaMo reasoning_effort", async () => {
+    mocks.responses.push(
+      sseResponse({
+        id: "chatcmpl-reasoning-effort",
+        choices: [
+          {
+            delta: { content: "ok" },
+            finish_reason: "stop",
+          },
+        ],
+      }),
+    );
+
+    await runNativePlamoStream({ reasoning: "max" });
+
+    const body = JSON.parse(String(mocks.fetch.mock.calls[0]?.[1]?.body));
+    expect(body.reasoning_effort).toBe("medium");
+  });
+
+  it("maps thinking off to PLaMo reasoning_effort none", async () => {
+    mocks.responses.push(
+      sseResponse({
+        id: "chatcmpl-reasoning-off",
+        choices: [
+          {
+            delta: { content: "ok" },
+            finish_reason: "stop",
+          },
+        ],
+      }),
+    );
+
+    await runNativePlamoStream({ reasoning: "off" });
+
+    const body = JSON.parse(String(mocks.fetch.mock.calls[0]?.[1]?.body));
+    expect(body.reasoning_effort).toBe("none");
+  });
+
+  it("emits PLaMo reasoning deltas as thinking blocks", async () => {
+    mocks.responses.push(
+      sseResponse(
+        {
+          id: "chatcmpl-reasoning",
+          choices: [
+            {
+              delta: { reasoning: "hidden reasoning" },
+              finish_reason: null,
+            },
+          ],
+        },
+        {
+          id: "chatcmpl-reasoning",
+          choices: [
+            {
+              delta: { content: "visible answer" },
+              finish_reason: "stop",
+            },
+          ],
+        },
+      ),
+    );
+
+    const { events, message } = await runNativePlamoStream({ reasoning: "medium" });
+
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: "thinking_start" }),
+        expect.objectContaining({ type: "thinking_delta", delta: "hidden reasoning" }),
+        expect.objectContaining({ type: "thinking_end", content: "hidden reasoning" }),
+      ]),
+    );
+    expect(message.content).toEqual([
+      { type: "thinking", thinking: "hidden reasoning", thinkingSignature: "reasoning_content" },
+      { type: "text", text: "visible answer" },
+    ]);
   });
 
   it("retries once when the stream ends before assistant output and finish_reason", async () => {

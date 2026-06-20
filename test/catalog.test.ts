@@ -13,6 +13,17 @@ describe("PLaMo provider catalog", () => {
     expect(provider.api).toBe("openai-completions");
     expect(provider.baseUrl).toBe("https://api.platform.preferredai.jp/v1");
     expect(provider.models.map((model) => model.id)).toEqual([PLAMO_DEFAULT_MODEL_ID]);
+    expect(provider.models[0]).toMatchObject({
+      reasoning: true,
+      compat: {
+        supportsReasoningEffort: true,
+        reasoningEffortMap: {
+          off: "none",
+          medium: "medium",
+          max: "medium",
+        },
+      },
+    });
   });
 
   it("returns fresh model input arrays for callers", () => {
