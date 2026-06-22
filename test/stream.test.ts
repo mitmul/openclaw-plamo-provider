@@ -22,8 +22,8 @@ vi.mock("openclaw/plugin-sdk/provider-transport-runtime", () => ({
 }));
 
 const model: Model<"openai-completions"> = {
-  id: "plamo-test",
-  name: "PLaMo Test",
+  id: "plamo-3.0-prime",
+  name: "PLaMo 3.0 Prime",
   api: "openai-completions",
   provider: "plamo",
   baseUrl: "https://api.example.test/v1",
@@ -120,6 +120,25 @@ describe("PLaMo native stream handling", () => {
     expect(body.reasoning_effort).toBe("medium");
   });
 
+  it("requests detailed reasoning summaries for PLaMo 3.0 Prime", async () => {
+    mocks.responses.push(
+      sseResponse({
+        id: "chatcmpl-reasoning-summary-request",
+        choices: [
+          {
+            delta: { content: "ok" },
+            finish_reason: "stop",
+          },
+        ],
+      }),
+    );
+
+    await runNativePlamoStream({ reasoning: "medium" });
+
+    const body = JSON.parse(String(mocks.fetch.mock.calls[0]?.[1]?.body));
+    expect(body.reasoning).toEqual({ summary: "detailed" });
+  });
+
   it("maps thinking off to PLaMo reasoning_effort none", async () => {
     mocks.responses.push(
       sseResponse({
@@ -174,6 +193,46 @@ describe("PLaMo native stream handling", () => {
     );
     expect(message.content).toEqual([
       { type: "thinking", thinking: "hidden reasoning", thinkingSignature: "reasoning_content" },
+      { type: "text", text: "visible answer" },
+    ]);
+  });
+
+  it("emits PLaMo reasoning_summary chunks as thinking blocks", async () => {
+    mocks.responses.push(
+      sseResponse(
+        {
+          id: "chatcmpl-reasoning-summary",
+          choices: [
+            {
+              delta: { content: null, reasoning: null },
+              finish_reason: null,
+              reasoning_summary: ["summary reasoning"],
+            },
+          ],
+        },
+        {
+          id: "chatcmpl-reasoning-summary",
+          choices: [
+            {
+              delta: { content: "visible answer" },
+              finish_reason: "stop",
+            },
+          ],
+        },
+      ),
+    );
+
+    const { events, message } = await runNativePlamoStream({ reasoning: "medium" });
+
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: "thinking_start" }),
+        expect.objectContaining({ type: "thinking_delta", delta: "summary reasoning" }),
+        expect.objectContaining({ type: "thinking_end", content: "summary reasoning" }),
+      ]),
+    );
+    expect(message.content).toEqual([
+      { type: "thinking", thinking: "summary reasoning", thinkingSignature: "reasoning_content" },
       { type: "text", text: "visible answer" },
     ]);
   });
