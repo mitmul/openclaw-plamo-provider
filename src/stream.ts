@@ -16,7 +16,10 @@ import { resolveEnvApiKey } from "openclaw/plugin-sdk/provider-auth-runtime";
 import {
   buildGuardedModelFetch,
 } from "openclaw/plugin-sdk/provider-transport-runtime";
-import { PLAMO_REASONING_EFFORT_MAP } from "./model-definitions.js";
+import {
+  PLAMO_DEFAULT_MODEL_ID,
+  PLAMO_REASONING_EFFORT_MAP,
+} from "./model-definitions.js";
 import { PLAMO_REQUEST_AUTH_MARKER } from "./provider-catalog.js";
 import { normalizeOpenAICompatibleToolParameters } from "./tool-schema.js";
 
@@ -42,6 +45,7 @@ const PLAMO_TAG_TOKENS = [
 ] as const;
 const PLAMO_SYNTHETIC_TURN_SEED_SYMBOL = Symbol("openclaw.plamoSyntheticTurnSeed");
 const PLAMO_EMPTY_STREAM_MAX_RETRIES = 1;
+const PLAMO_REASONING_SUMMARY_DETAIL = "detailed";
 
 const PLAMO_TOOL_REQUEST_BLOCK_RE = new RegExp(
   `${escapeRegExp(PLAMO_BEGIN_TOOL_REQUEST)}(.*?)${escapeRegExp(PLAMO_END_TOOL_REQUEST)}`,
@@ -135,6 +139,7 @@ type OpenAIStyleChunkDelta = {
 type OpenAIStyleChunkChoice = {
   finish_reason?: unknown;
   delta?: OpenAIStyleChunkDelta | null;
+  reasoning_summary?: unknown;
   usage?: OpenAIStyleUsage | null;
 };
 
@@ -673,6 +678,31 @@ function resolvePlamoOptionsReasoningEffort(
   );
 }
 
+function isPlamoPrimeModel(model: RuntimeModel): boolean {
+  const normalizedId = model.id.trim().toLowerCase();
+  return (
+    normalizedId === PLAMO_DEFAULT_MODEL_ID ||
+    normalizedId === `plamo/${PLAMO_DEFAULT_MODEL_ID}`
+  );
+}
+
+function injectPlamoReasoningSummary(
+  payload: Record<string, unknown>,
+  model: RuntimeModel,
+): void {
+  if (!isPlamoPrimeModel(model) || !model.reasoning) {
+    return;
+  }
+  const existingReasoning = payload.reasoning;
+  payload.reasoning =
+    existingReasoning && typeof existingReasoning === "object" && !Array.isArray(existingReasoning)
+      ? {
+          ...existingReasoning,
+          summary: PLAMO_REASONING_SUMMARY_DETAIL,
+        }
+      : { summary: PLAMO_REASONING_SUMMARY_DETAIL };
+}
+
 function hasToolHistory(messages: AgentMessage[]): boolean {
   for (const message of messages) {
     if (message.role === "toolResult") {
@@ -753,6 +783,7 @@ function normalizePlamoStreamingPayload(
       payload.reasoning_effort = reasoningEffort;
     }
   }
+  injectPlamoReasoningSummary(payload, model);
   injectPlamoMaxTokens(payload, model, compat);
 
   const tools = payload.tools;
@@ -1075,14 +1106,26 @@ function resolveToolCallChunkIndex(toolCall: OpenAIStyleToolCall): number | null
     : null;
 }
 
-function extractStreamingReasoning(delta: OpenAIStyleChunkDelta): string {
-  for (const field of ["reasoning_content", "reasoning", "reasoning_text"] as const) {
-    const value = delta[field];
-    if (typeof value === "string" && value.length > 0) {
-      return value;
-    }
+function collectStreamingReasoningValue(value: unknown): string[] {
+  if (typeof value === "string" && value.length > 0) {
+    return [value];
   }
-  return "";
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter((item): item is string => typeof item === "string" && item.length > 0);
+}
+
+function extractStreamingReasoning(
+  delta: OpenAIStyleChunkDelta,
+  choice?: OpenAIStyleChunkChoice,
+): string {
+  const parts: string[] = [];
+  for (const field of ["reasoning_content", "reasoning", "reasoning_text"] as const) {
+    parts.push(...collectStreamingReasoningValue(delta[field]));
+  }
+  parts.push(...collectStreamingReasoningValue(choice?.reasoning_summary));
+  return parts.join("");
 }
 
 function createNativePlamoStream(
@@ -1228,10 +1271,7 @@ function createNativePlamoStream(
             }
           }
 
-          const delta = choice.delta;
-          if (!isOpenAIStyleChunkDelta(delta)) {
-            continue;
-          }
+          const delta = isOpenAIStyleChunkDelta(choice.delta) ? choice.delta : {};
 
           const textDelta = typeof delta.content === "string" ? delta.content : "";
           if (textDelta) {
@@ -1265,7 +1305,7 @@ function createNativePlamoStream(
             }
           }
 
-          const reasoningDelta = extractStreamingReasoning(delta);
+          const reasoningDelta = extractStreamingReasoning(delta, choice);
           if (reasoningDelta) {
             sawAssistantOutput = true;
             finishOpenToolCallBlocks();
